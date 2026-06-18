@@ -27,6 +27,9 @@
           {% elif c.status == 'error' %}badge-error
           {% elif c.status == 'destroying' %}badge-destroying
           {% else %}badge-creating{% endif %}">{{ c.status }}</span>
+        {% if c.persistent %}
+        <span class="badge-status" style="background:rgba(59,130,246,.12);color:var(--accent);border:1px solid rgba(59,130,246,.3);margin-left:6px">persistant</span>
+        {% endif %}
       </div>
       <div class="progress-steps" id="progress-{{ c.vmid }}"></div>
       <div class="flex mt-4">
@@ -53,6 +56,14 @@
           <span class="val memory-val">{{ tpl.memory }} Mo</span>
           <span class="bounds">{{ tpl.memory_min }}–{{ tpl.memory_max }}</span>
         </div>
+        <div class="row" style="margin-top:6px">
+          <label style="flex:0 0 auto">Mode</label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1;margin:0;text-transform:none;letter-spacing:0;font-size:13px;color:var(--text)">
+            <input type="checkbox" class="persistent-toggle" style="width:auto;accent-color:var(--accent)">
+            <span class="persistent-label">Non persistant</span>
+          </label>
+          <span class="text-mute persistent-hint">VM détruite à la déconnexion</span>
+        </div>
       </div>
       <button class="btn btn-primary" onclick="launchClone({{ tpl.id }}, this)">Lancer</button>
     {% endif %}
@@ -70,7 +81,7 @@
 <div class="card" style="padding:0;overflow:hidden">
   <table>
     <thead>
-      <tr><th>VMID</th><th>Desktop</th><th>IP</th><th>Statut</th><th>Actions</th></tr>
+      <tr><th>VMID</th><th>Desktop</th><th>IP</th><th>Mode</th><th>Statut</th><th>Actions</th></tr>
     </thead>
     <tbody>
       {% for c in my_clones %}
@@ -78,6 +89,7 @@
         <td>{{ c.vmid }}</td>
         <td>{{ c.template_name or '—' }}</td>
         <td class="text-dim">{{ c.ip_address or '—' }}</td>
+        <td><span class="text-dim">{{ 'Persistant' if c.persistent else 'Non persistant' }}</span></td>
         <td><span class="badge-status
           {% if c.status == 'ready' %}badge-ready
           {% elif c.status == 'error' %}badge-error
@@ -115,9 +127,11 @@ async function launchClone(templateId, btn){
   const card = btn.closest('[data-template-id]');
   const cores = card?.querySelector('.cores-slider');
   const memory = card?.querySelector('.memory-slider');
+  const persistentToggle = card?.querySelector('.persistent-toggle');
   const body = {template_id: templateId};
   if(cores) body.cores = parseInt(cores.value);
   if(memory) body.memory = parseInt(memory.value);
+  if(persistentToggle) body.persistent = persistentToggle.checked;
   try{
     const resp = await fetch('/api/clone/request',{
       method:'POST',headers:{'Content-Type':'application/json'},
@@ -186,6 +200,21 @@ document.querySelectorAll('.cores-slider').forEach(s => {
 document.querySelectorAll('.memory-slider').forEach(s => {
   const val = s.parentElement.querySelector('.memory-val');
   s.addEventListener('input', () => { val.textContent = s.value + ' Mo'; });
+});
+
+// Toggle persistant : mise à jour du label
+document.querySelectorAll('.persistent-toggle').forEach(cb => {
+  const label = cb.parentElement.querySelector('.persistent-label');
+  const hint = cb.closest('.row').querySelector('.persistent-hint');
+  cb.addEventListener('change', () => {
+    if(cb.checked){
+      label.textContent = 'Persistant';
+      hint.textContent = 'VM conservée après déconnexion';
+    } else {
+      label.textContent = 'Non persistant';
+      hint.textContent = 'VM détruite à la déconnexion';
+    }
+  });
 });
 
 // Reprise du polling pour les clones en cours

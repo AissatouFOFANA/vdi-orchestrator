@@ -58,6 +58,8 @@ async def _monitor_tick():
 
         log.debug(f"Clone {vmid} (user={clone.get('username')}): session_state={state}")
 
+        is_persistent = clone.get("persistent", False)
+
         if state["active"]:
             with db_cursor() as (conn, cur):
                 cur.execute("""
@@ -68,14 +70,17 @@ async def _monitor_tick():
                 """, (vmid,))
         else:
             if state["has_history"]:
-                log.info(f"Clone {vmid}: session Guac terminée, destruction auto")
-                try:
-                    await clone_manager.destroy_clone(vmid, reason="auto_disconnect")
-                except Exception as e:
-                    log.error(f"Auto destroy {vmid} failed: {e}")
-                continue
+                if is_persistent:
+                    log.debug(f"Clone {vmid}: session terminée mais persistant, conservation")
+                else:
+                    log.info(f"Clone {vmid}: session Guac terminée, destruction auto")
+                    try:
+                        await clone_manager.destroy_clone(vmid, reason="auto_disconnect")
+                    except Exception as e:
+                        log.error(f"Auto destroy {vmid} failed: {e}")
+                    continue
 
-            if age > settings.UNUSED_TIMEOUT:
+            if not is_persistent and age > settings.UNUSED_TIMEOUT:
                 log.warning(f"Clone {vmid}: jamais utilisé après {int(age)}s, destruction")
                 try:
                     await clone_manager.destroy_clone(vmid, reason="unused_timeout", do_backup=False)

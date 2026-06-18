@@ -107,7 +107,7 @@ label{display:block;color:var(--text-dim);font-size:12px;font-weight:500;margin-
     {% endif %}
   </nav>
   <div class="user-info">
-    <span>{{ user.username }}</span>
+    <button class="btn btn-ghost" style="padding:6px 12px" onclick="document.getElementById('profile-modal').classList.add('open')">{{ user.username }}</button>
     {% if user.is_admin %}<span class="badge">ADMIN</span>{% endif %}
     <a href="/logout" class="btn btn-ghost" style="padding:6px 12px">Déconnexion</a>
   </div>
@@ -116,5 +116,79 @@ label{display:block;color:var(--text-dim);font-size:12px;font-weight:500;margin-
 <main>
 {% block content %}{% endblock %}
 </main>
+
+<!-- Modal Profil -->
+<div class="modal-overlay" id="profile-modal">
+  <div class="modal">
+    <div class="flex-between mb-4">
+      <h3>Mon profil</h3>
+      <button class="btn btn-ghost" style="padding:4px 10px" onclick="this.closest('.modal-overlay').classList.remove('open')">X</button>
+    </div>
+    <div class="mb-4">
+      <span class="text-mute">Utilisateur</span>
+      <div style="font-weight:600;font-size:16px;margin-top:4px">{{ user.username }}</div>
+    </div>
+    {% if user.groups %}
+    <div class="mb-4">
+      <span class="text-mute">Groupes</span>
+      <div style="margin-top:4px">{% for g in user.groups %}<span class="badge" style="margin-right:6px">{{ g }}</span>{% endfor %}</div>
+    </div>
+    {% endif %}
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    <h3 style="font-size:15px;margin-bottom:12px">Changer le mot de passe</h3>
+    <div id="profile-msg" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:6px;font-size:13px"></div>
+    <form onsubmit="changePassword(event)">
+      <div class="form-row">
+        <label>Ancien mot de passe</label>
+        <input type="password" id="old-password" required autocomplete="current-password">
+      </div>
+      <div class="form-row">
+        <label>Nouveau mot de passe</label>
+        <input type="password" id="new-password" required minlength="4" autocomplete="new-password">
+      </div>
+      <div class="form-row">
+        <label>Confirmer</label>
+        <input type="password" id="confirm-password" required minlength="4" autocomplete="new-password">
+      </div>
+      <button type="submit" class="btn btn-primary" id="pwd-btn">Modifier</button>
+    </form>
+  </div>
+</div>
+<script>
+async function changePassword(e){
+  e.preventDefault();
+  const msg = document.getElementById('profile-msg');
+  const oldPwd = document.getElementById('old-password').value;
+  const newPwd = document.getElementById('new-password').value;
+  const confirm = document.getElementById('confirm-password').value;
+  if(newPwd !== confirm){
+    msg.style.display='block'; msg.style.background='rgba(239,68,68,.15)'; msg.style.color='var(--danger)';
+    msg.textContent='Les mots de passe ne correspondent pas'; return;
+  }
+  const btn = document.getElementById('pwd-btn');
+  btn.disabled = true; btn.textContent = '...';
+  try{
+    const resp = await fetch('/api/profile/password',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({old_password: oldPwd, new_password: newPwd})
+    });
+    if(resp.ok){
+      msg.style.display='block'; msg.style.background='rgba(34,197,94,.15)'; msg.style.color='var(--success)';
+      msg.textContent='Mot de passe modifie avec succes';
+      document.getElementById('old-password').value='';
+      document.getElementById('new-password').value='';
+      document.getElementById('confirm-password').value='';
+    } else {
+      const err = await resp.json().catch(()=>({detail:'Erreur'}));
+      msg.style.display='block'; msg.style.background='rgba(239,68,68,.15)'; msg.style.color='var(--danger)';
+      msg.textContent = err.detail || 'Erreur';
+    }
+  }catch(ex){
+    msg.style.display='block'; msg.style.background='rgba(239,68,68,.15)'; msg.style.color='var(--danger)';
+    msg.textContent='Erreur reseau';
+  }
+  btn.disabled = false; btn.textContent = 'Modifier';
+}
+</script>
 </body>
 </html>

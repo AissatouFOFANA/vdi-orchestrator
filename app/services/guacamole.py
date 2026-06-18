@@ -94,6 +94,37 @@ def is_admin(username: str) -> bool:
         conn.close()
 
 
+def change_password(username: str, old_password: str, new_password: str) -> bool:
+    """Change le mot de passe d'un utilisateur Guacamole."""
+    if not authenticate_user(username, old_password):
+        return False
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        # Générer un nouveau sel (32 bytes aléatoires)
+        import os
+        new_salt = os.urandom(32)
+        salt_hex = new_salt.hex().upper()
+        new_hash = hashlib.sha256((new_password + salt_hex).encode("utf-8")).digest()
+        cur.execute("""
+            UPDATE guacamole_user
+            SET password_hash = %s, password_salt = %s
+            WHERE entity_id = (
+                SELECT entity_id FROM guacamole_entity
+                WHERE name = %s AND type = 'USER'
+            )
+        """, (new_hash, new_salt, username))
+        conn.commit()
+        log.info(f"Password changed for user {username}")
+        return True
+    except Exception as e:
+        conn.rollback()
+        log.error(f"Password change failed for {username}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
 def list_users() -> list[dict]:
     conn = get_db()
     try:

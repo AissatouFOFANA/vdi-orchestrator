@@ -185,6 +185,7 @@ async def api_request_clone(request: Request, payload: CloneRequest):
     clone = await clone_manager.request_clone(
         user["username"], template_id,
         cores=payload.cores, memory=payload.memory,
+        persistent=payload.persistent,
     )
     return clone
 
@@ -261,6 +262,21 @@ async def api_destroy_clone(vmid: int, request: Request,
 async def api_destroy_all(request: Request):
     require_admin(request)
     return await clone_manager.destroy_all_clones(reason="manual")
+
+
+# ── Profil utilisateur ─────────────────────────────────
+
+@router.post("/profile/password")
+async def api_change_password(request: Request,
+                              old_password: str = Body(..., embed=True),
+                              new_password: str = Body(..., embed=True)):
+    user = require_user(request)
+    if len(new_password) < 4:
+        raise HTTPException(400, "Le mot de passe doit contenir au moins 4 caractères")
+    ok = guacamole.change_password(user["username"], old_password, new_password)
+    if not ok:
+        raise HTTPException(403, "Ancien mot de passe incorrect")
+    return {"status": "ok"}
 
 
 # ── Sessions / stats (admin) ────────────────────────────

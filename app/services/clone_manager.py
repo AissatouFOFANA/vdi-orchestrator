@@ -123,7 +123,8 @@ def _clamp_resources(template: dict, cores: Optional[int], memory: Optional[int]
 
 async def request_clone(username: str, template_id: int,
                         cores: Optional[int] = None,
-                        memory: Optional[int] = None) -> dict:
+                        memory: Optional[int] = None,
+                        persistent: bool = False) -> dict:
     template = fetch_template(template_id)
     if not template or not template["enabled"]:
         raise HTTPException(404, "Template introuvable ou désactivé")
@@ -155,10 +156,10 @@ async def request_clone(username: str, template_id: int,
                 with db_cursor() as (conn, cur):
                     cur.execute("""
                         INSERT INTO vdi_clone
-                            (vmid, template_id, clone_name, username, status, cores, memory)
-                        VALUES (%s, %s, %s, %s, 'creating', %s, %s)
+                            (vmid, template_id, clone_name, username, status, cores, memory, persistent)
+                        VALUES (%s, %s, %s, %s, 'creating', %s, %s, %s)
                     """, (candidate, template_id, clone_name, username,
-                          chosen_cores, chosen_memory))
+                          chosen_cores, chosen_memory, persistent))
                 new_vmid = candidate
                 break
             except Exception as e:

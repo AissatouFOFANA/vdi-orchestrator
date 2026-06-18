@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS vdi_clone (
 
 ALTER TABLE vdi_clone ADD COLUMN IF NOT EXISTS cores INTEGER;
 ALTER TABLE vdi_clone ADD COLUMN IF NOT EXISTS memory INTEGER;
+ALTER TABLE vdi_clone ADD COLUMN IF NOT EXISTS persistent BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_vdi_clone_username ON vdi_clone(username);
 CREATE INDEX IF NOT EXISTS idx_vdi_clone_status ON vdi_clone(status);

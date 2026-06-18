@@ -52,6 +52,7 @@ class CloneOut(BaseModel):
     status: str
     cores: Optional[int] = None
     memory: Optional[int] = None
+    persistent: bool = False
     created_at: str
     connected_at: Optional[str]
     last_activity: Optional[str]
@@ -63,6 +64,7 @@ class CloneRequest(BaseModel):
     template_id: int
     cores: Optional[int] = None
     memory: Optional[int] = None
+    persistent: bool = False
 
 
 class DestroyRequest(BaseModel):
