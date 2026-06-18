@@ -117,6 +117,7 @@ label{display:block;color:var(--text-dim);font-size:12px;font-weight:500;margin-
 {% block content %}{% endblock %}
 </main>
 
+{% if user %}
 <!-- Modal Profil -->
 <div class="modal-overlay" id="profile-modal">
   <div class="modal">
@@ -190,5 +191,6 @@ async function changePassword(e){
   btn.disabled = false; btn.textContent = 'Modifier';
 }
 </script>
+{% endif %}
 </body>
 </html>
