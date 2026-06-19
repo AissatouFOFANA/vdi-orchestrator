@@ -19,7 +19,7 @@ log = logging.getLogger("vdi-orchestrator")
 
 # Si le nouveau backup est plus petit que ce ratio du précédent,
 # on refuse de l'écraser (garde-fou contre un home corrompu/vidé).
-MIN_RATIO_VS_PREVIOUS = 0.5
+MIN_RATIO_VS_PREVIOUS = 0.1
 # Taille en dessous de laquelle on considère le tar suspect (octets).
 MIN_REASONABLE_SIZE = 1024
 
@@ -88,7 +88,7 @@ def _commit_backup(tmp: Path, dest: Path, username: str, template_id: int) -> Op
         if prev_size > 0 and new_size < prev_size * MIN_RATIO_VS_PREVIOUS:
             log.warning(
                 f"Backup refusé pour {username}/template_{template_id}: "
-                f"nouveau {new_size}o < 50% de l'ancien {prev_size}o "
+                f"nouveau {new_size}o < 10% de l'ancien {prev_size}o "
                 f"(probable corruption/home vidé). Ancien backup préservé."
             )
             tmp.unlink(missing_ok=True)
