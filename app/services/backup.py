@@ -7,6 +7,7 @@ précédent (et le .bak avant lui) restent intacts.
 import os
 import logging
 import asyncio
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -30,15 +31,27 @@ def _backup_path(username: str, template_id: int) -> Path:
     return d / f"template_{template_id}.tar.gz"
 
 
-def _ssh_client(ip: str, vm_user: str, vm_password: str) -> paramiko.SSHClient:
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(
-        hostname=ip, port=22,
-        username=vm_user, password=vm_password,
-        timeout=15, banner_timeout=15, auth_timeout=15,
-    )
-    return client
+def _ssh_client(ip: str, vm_user: str, vm_password: str,
+                retries: int = 1, delay: float = 5) -> paramiko.SSHClient:
+    """Connexion SSH avec tentatives de retry (utile au boot de la VM)."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                hostname=ip, port=22,
+                username=vm_user, password=vm_password,
+                timeout=15, banner_timeout=15, auth_timeout=15,
+            )
+            return client
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                log.debug(f"SSH {ip} attempt {attempt+1}/{retries} failed: {e}, retry in {delay}s")
+                time.sleep(delay)
+            else:
+                raise last_err
 
 
 def has_backup(username: str, template_id: int) -> bool:
@@ -206,7 +219,8 @@ async def restore_home(ip: str, username: str, template_id: int,
     def _try_restore(local_src: Path) -> bool:
         ssh = None
         try:
-            ssh = _ssh_client(ip, vm_user, vm_password)
+            ssh = _ssh_client(ip, vm_user, vm_password,
+                              retries=6, delay=5)
 
             sftp = ssh.open_sftp()
             try:

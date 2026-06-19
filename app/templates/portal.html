@@ -21,6 +21,23 @@
       <div class="text-dim mb-4">
         <span class="text-mute">Ressources allouées</span> · {{ c.cores or tpl.cores }} vCPU · {{ c.memory or tpl.memory }} Mo
       </div>
+      {% if c.status == 'ready' %}
+      <div class="clone-metrics" data-vmid="{{ c.vmid }}" style="margin-bottom:10px;padding:10px 12px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid rgba(255,255,255,.06)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
+          <div>
+            <span class="text-mute">CPU</span>
+            <div class="pm-cpu" style="margin-top:4px">—</div>
+          </div>
+          <div>
+            <span class="text-mute">RAM</span>
+            <div class="pm-ram" style="margin-top:4px">—</div>
+          </div>
+        </div>
+        <div style="font-size:12px;margin-top:6px;color:var(--text-dim)">
+          Uptime : <span class="pm-uptime">—</span>
+        </div>
+      </div>
+      {% endif %}
       <div class="mt-4">
         <span class="badge-status
           {% if c.status == 'ready' %}badge-ready
@@ -56,6 +73,7 @@
           <span class="val memory-val">{{ tpl.memory }} Mo</span>
           <span class="bounds">{{ tpl.memory_min }}–{{ tpl.memory_max }}</span>
         </div>
+        {% if user.is_admin %}
         <div class="row" style="margin-top:6px">
           <label style="flex:0 0 auto">Mode</label>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1;margin:0;text-transform:none;letter-spacing:0;font-size:13px;color:var(--text)">
@@ -64,6 +82,7 @@
           </label>
           <span class="text-mute persistent-hint">VM détruite à la déconnexion</span>
         </div>
+        {% endif %}
       </div>
       <button class="btn btn-primary" onclick="launchClone({{ tpl.id }}, this)">Lancer</button>
     {% endif %}
@@ -81,7 +100,7 @@
 <div class="card" style="padding:0;overflow:hidden">
   <table>
     <thead>
-      <tr><th>VMID</th><th>Desktop</th><th>IP</th><th>Mode</th><th>Statut</th><th>Actions</th></tr>
+      <tr><th>VMID</th><th>Desktop</th><th>IP</th><th>CPU</th><th>RAM</th><th>Mode</th><th>Statut</th><th>Actions</th></tr>
     </thead>
     <tbody>
       {% for c in my_clones %}
@@ -89,6 +108,8 @@
         <td>{{ c.vmid }}</td>
         <td>{{ c.template_name or '—' }}</td>
         <td class="text-dim">{{ c.ip_address or '—' }}</td>
+        <td class="tbl-cpu" data-vmid="{{ c.vmid }}">—</td>
+        <td class="tbl-ram" data-vmid="{{ c.vmid }}">—</td>
         <td><span class="text-dim">{{ 'Persistant' if c.persistent else 'Non persistant' }}</span></td>
         <td><span class="badge-status
           {% if c.status == 'ready' %}badge-ready
@@ -216,6 +237,60 @@ document.querySelectorAll('.persistent-toggle').forEach(cb => {
     }
   });
 });
+
+// --- Métriques live des clones ---
+function fmtUptime(s){
+  if(!s && s !== 0) return '—';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? h + 'h' + String(m).padStart(2,'0') : m + 'min';
+}
+
+function miniBar(pct, color){
+  return '<div style="display:flex;align-items:center;gap:4px">'
+    + '<div style="flex:1;height:5px;background:rgba(255,255,255,.08);border-radius:3px;min-width:36px">'
+    + '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:3px"></div></div>'
+    + '<span style="font-size:12px">' + pct + '%</span></div>';
+}
+
+async function refreshPortalMetrics(){
+  const cards = document.querySelectorAll('.clone-metrics[data-vmid]');
+  const tblCpus = document.querySelectorAll('.tbl-cpu[data-vmid]');
+  const vmids = new Set();
+  cards.forEach(el => vmids.add(el.dataset.vmid));
+  tblCpus.forEach(el => vmids.add(el.dataset.vmid));
+
+  for(const vmid of vmids){
+    try{
+      const resp = await fetch('/api/clone/' + vmid + '/metrics');
+      if(!resp.ok) continue;
+      const m = await resp.json();
+      if(m.error) continue;
+
+      const cpuColor = m.cpu_pct > 80 ? 'var(--danger)' : m.cpu_pct > 50 ? '#f59e0b' : 'var(--success)';
+      const ramColor = m.mem_pct > 85 ? 'var(--danger)' : m.mem_pct > 60 ? '#f59e0b' : 'var(--accent)';
+
+      // Carte du clone
+      const card = document.querySelector('.clone-metrics[data-vmid="' + vmid + '"]');
+      if(card){
+        card.querySelector('.pm-cpu').innerHTML = miniBar(m.cpu_pct, cpuColor);
+        card.querySelector('.pm-ram').innerHTML = m.mem_used_mb + '/' + m.mem_max_mb + ' Mo (' + m.mem_pct + '%)';
+        card.querySelector('.pm-uptime').textContent = fmtUptime(m.uptime_seconds);
+      }
+
+      // Tableau sessions actives
+      const tcpu = document.querySelector('.tbl-cpu[data-vmid="' + vmid + '"]');
+      const tram = document.querySelector('.tbl-ram[data-vmid="' + vmid + '"]');
+      if(tcpu) tcpu.innerHTML = miniBar(m.cpu_pct, cpuColor);
+      if(tram) tram.innerHTML = miniBar(m.mem_pct, ramColor);
+    }catch(e){}
+  }
+}
+
+if(document.querySelector('.clone-metrics[data-vmid]') || document.querySelector('.tbl-cpu[data-vmid]')){
+  refreshPortalMetrics();
+  setInterval(refreshPortalMetrics, 10000);
+}
 
 // Reprise du polling pour les clones en cours
 document.querySelectorAll('[data-template-id]').forEach(card => {

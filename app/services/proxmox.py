@@ -149,6 +149,32 @@ async def wait_for_vm_ip(vmid: int) -> str:
     raise HTTPException(504, f"VM {vmid} did not get an IP within {settings.POLL_TIMEOUT}s")
 
 
+async def get_vm_metrics(vmid: int) -> Optional[dict]:
+    """Récupère les métriques live d'une VM depuis Proxmox."""
+    try:
+        data = await api("GET", f"/nodes/{settings.PROXMOX_NODE}/qemu/{vmid}/status/current")
+        if not data:
+            return None
+        maxmem = data.get("maxmem", 1)
+        mem = data.get("mem", 0)
+        return {
+            "cpu_pct": round(data.get("cpu", 0) * 100, 1),
+            "cpus": data.get("cpus", 0),
+            "mem_used_mb": round(mem / (1024 * 1024)),
+            "mem_max_mb": round(maxmem / (1024 * 1024)),
+            "mem_pct": round(mem / maxmem * 100, 1) if maxmem else 0,
+            "disk_read_mb": round(data.get("diskread", 0) / (1024 * 1024), 1),
+            "disk_write_mb": round(data.get("diskwrite", 0) / (1024 * 1024), 1),
+            "net_in_mb": round(data.get("netin", 0) / (1024 * 1024), 1),
+            "net_out_mb": round(data.get("netout", 0) / (1024 * 1024), 1),
+            "uptime_seconds": data.get("uptime", 0),
+            "status": data.get("status", "unknown"),
+        }
+    except Exception as e:
+        log.warning(f"get_vm_metrics({vmid}) failed: {e}")
+        return None
+
+
 async def wait_for_clone_task(vmid: int):
     start = time.time()
     while time.time() - start < settings.POLL_TIMEOUT:

@@ -77,26 +77,28 @@
   <div class="card" style="padding:0;overflow:hidden">
     <table>
       <thead>
-        <tr><th>VMID</th><th>Utilisateur</th><th>Template</th><th>IP</th><th>Statut</th><th>Créé</th><th></th></tr>
+        <tr><th>VMID</th><th>Utilisateur</th><th>Template</th><th>IP</th><th>CPU</th><th>RAM</th><th>Uptime</th><th>Statut</th><th></th></tr>
       </thead>
       <tbody>
         {% for c in active_clones %}
-        <tr>
+        <tr data-vmid="{{ c.vmid }}">
           <td>{{ c.vmid }}</td>
           <td>{{ c.username }}</td>
           <td>{{ c.template_name or '—' }}</td>
           <td class="text-dim">{{ c.ip_address or '—' }}</td>
+          <td class="metric-cpu">—</td>
+          <td class="metric-ram">—</td>
+          <td class="metric-uptime">—</td>
           <td>
             <span class="badge-status
               {% if c.status == 'ready' %}badge-ready
               {% elif c.status == 'error' %}badge-error
               {% else %}badge-creating{% endif %}">{{ c.status }}</span>
           </td>
-          <td class="text-mute">{{ c.created_at }}</td>
           <td><button class="btn btn-danger" style="padding:5px 10px" onclick="destroyClone({{ c.vmid }})">Détruire</button></td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="empty">Aucun clone actif</td></tr>
+        <tr><td colspan="9" class="empty">Aucun clone actif</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -285,6 +287,50 @@ async function destroyAll(){
   await fetch('/api/clones/destroy-all', {method:'POST'});
   window.location.reload();
 }
+
+// --- Métriques live des clones ---
+function fmtUptime(s){
+  if(!s && s !== 0) return '—';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? h + 'h' + String(m).padStart(2,'0') : m + 'min';
+}
+
+function cpuBar(pct){
+  const color = pct > 80 ? 'var(--danger)' : pct > 50 ? '#f59e0b' : 'var(--success)';
+  return '<div style="display:flex;align-items:center;gap:6px">'
+    + '<div style="flex:1;height:6px;background:rgba(255,255,255,.08);border-radius:3px;min-width:48px">'
+    + '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:3px"></div></div>'
+    + '<span style="font-size:12px;min-width:38px">' + pct + '%</span></div>';
+}
+
+function ramBar(pct, used, max){
+  const color = pct > 85 ? 'var(--danger)' : pct > 60 ? '#f59e0b' : 'var(--accent)';
+  return '<div style="display:flex;align-items:center;gap:6px">'
+    + '<div style="flex:1;height:6px;background:rgba(255,255,255,.08);border-radius:3px;min-width:48px">'
+    + '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:3px"></div></div>'
+    + '<span style="font-size:12px;min-width:58px">' + used + '/' + max + ' Mo</span></div>';
+}
+
+async function refreshMetrics(){
+  const rows = document.querySelectorAll('#panel-clones tr[data-vmid]');
+  for(const row of rows){
+    const vmid = row.dataset.vmid;
+    try{
+      const resp = await fetch('/api/clone/' + vmid + '/metrics');
+      if(!resp.ok) continue;
+      const m = await resp.json();
+      if(m.error) continue;
+      row.querySelector('.metric-cpu').innerHTML = cpuBar(m.cpu_pct);
+      row.querySelector('.metric-ram').innerHTML = ramBar(m.mem_pct, m.mem_used_mb, m.mem_max_mb);
+      row.querySelector('.metric-uptime').textContent = fmtUptime(m.uptime_seconds);
+    }catch(e){}
+  }
+}
+
+// Rafraîchir les métriques toutes les 10 secondes
+refreshMetrics();
+setInterval(refreshMetrics, 10000);
 
 async function scanProxmox(){
   try{

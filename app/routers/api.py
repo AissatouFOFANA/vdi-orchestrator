@@ -182,10 +182,13 @@ async def api_request_clone(request: Request, payload: CloneRequest):
         if not (set(allowed) & set(user["groups"])):
             raise HTTPException(403, "Vous n'avez pas accès à ce template")
 
+    # Seul un admin peut activer le mode persistant
+    persistent = payload.persistent if user.get("is_admin") else False
+
     clone = await clone_manager.request_clone(
         user["username"], template_id,
         cores=payload.cores, memory=payload.memory,
-        persistent=payload.persistent,
+        persistent=persistent,
     )
     return clone
 
@@ -201,6 +204,25 @@ async def api_clone_status(vmid: int, request: Request):
     if clone.get("guac_connection_id"):
         clone["guac_url"] = guacamole.guac_client_url(clone["guac_connection_id"])
     return clone
+
+
+@router.get("/clone/{vmid}/metrics")
+async def api_clone_metrics(vmid: int, request: Request):
+    """Métriques live d'un clone depuis Proxmox (CPU, RAM, disque, réseau, uptime)."""
+    user = require_user(request)
+    clone = clone_manager.fetch_clone_by_vmid(vmid)
+    if not clone:
+        raise HTTPException(404, "Clone introuvable")
+    if not user.get("is_admin") and clone["username"] != user["username"]:
+        raise HTTPException(403, "Accès refusé")
+    if clone["status"] != "ready":
+        return {"error": "Clone pas encore prêt", "status": clone["status"]}
+    metrics = await proxmox.get_vm_metrics(vmid)
+    if not metrics:
+        raise HTTPException(502, "Impossible de récupérer les métriques Proxmox")
+    metrics["vmid"] = vmid
+    metrics["username"] = clone["username"]
+    return metrics
 
 
 @router.get("/connect/{vmid}")
