@@ -107,7 +107,7 @@ label{display:block;color:var(--text-dim);font-size:12px;font-weight:500;margin-
     {% endif %}
   </nav>
   <div class="user-info">
-    <button class="btn btn-ghost" style="padding:6px 12px" onclick="document.getElementById('profile-modal').classList.add('open')">{{ user.username }}</button>
+    <button class="btn btn-ghost" style="padding:6px 12px" onclick="openProfile()">{{ user.username }}</button>
     {% if user.is_admin %}<span class="badge">ADMIN</span>{% endif %}
     <a href="/logout" class="btn btn-ghost" style="padding:6px 12px">Déconnexion</a>
   </div>
@@ -153,6 +153,54 @@ label{display:block;color:var(--text-dim);font-size:12px;font-weight:500;margin-
       </div>
       <button type="submit" class="btn btn-primary" id="pwd-btn">Modifier</button>
     </form>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    <div class="flex-between" style="margin-bottom:12px">
+      <h3 style="font-size:15px;margin:0">Vérification en deux étapes (2FA)</h3>
+      <span id="tfa-badge" class="badge-status badge-destroying">...</span>
+    </div>
+    <div id="tfa-msg" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:6px;font-size:13px"></div>
+
+    <!-- État chargé dynamiquement -->
+    <div id="tfa-loading" class="text-mute">Chargement...</div>
+
+    <!-- 2FA désactivé : proposer l'activation -->
+    <div id="tfa-disabled" style="display:none">
+      <p class="text-dim" style="font-size:13px;margin-bottom:12px">
+        Recevez un code par email à chaque connexion pour sécuriser votre compte.
+      </p>
+      <div id="tfa-step-email">
+        <div class="form-row">
+          <label>Adresse email</label>
+          <input type="email" id="tfa-email" placeholder="vous@exemple.com" autocomplete="email">
+        </div>
+        <button class="btn btn-primary" id="tfa-send-btn" onclick="tfaSendCode()">Envoyer un code</button>
+      </div>
+      <div id="tfa-step-code" style="display:none">
+        <p class="text-dim" style="font-size:13px;margin-bottom:10px">
+          Code envoyé à <strong id="tfa-dest"></strong>
+        </p>
+        <div class="form-row">
+          <label>Code de vérification</label>
+          <input type="text" id="tfa-code" inputmode="numeric" maxlength="6"
+                 autocomplete="one-time-code" style="letter-spacing:6px;font-weight:600">
+        </div>
+        <button class="btn btn-success" id="tfa-confirm-btn" onclick="tfaConfirm()">Activer le 2FA</button>
+        <button class="btn btn-ghost" onclick="tfaSendCode()">Renvoyer</button>
+      </div>
+    </div>
+
+    <!-- 2FA activé : proposer la désactivation -->
+    <div id="tfa-enabled" style="display:none">
+      <p class="text-dim" style="font-size:13px;margin-bottom:12px">
+        Actif — codes envoyés à <strong id="tfa-enabled-email"></strong>
+      </p>
+      <div class="form-row">
+        <label>Mot de passe (pour désactiver)</label>
+        <input type="password" id="tfa-disable-pwd" autocomplete="current-password">
+      </div>
+      <button class="btn btn-danger" id="tfa-disable-btn" onclick="tfaDisable()">Désactiver le 2FA</button>
+    </div>
   </div>
 </div>
 <script>
@@ -189,6 +237,106 @@ async function changePassword(e){
     msg.textContent='Erreur reseau';
   }
   btn.disabled = false; btn.textContent = 'Modifier';
+}
+
+function openProfile(){
+  document.getElementById('profile-modal').classList.add('open');
+  load2fa();
+}
+
+function tfaShowMsg(text, ok){
+  const m = document.getElementById('tfa-msg');
+  m.style.display = 'block';
+  m.style.background = ok ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)';
+  m.style.color = ok ? 'var(--success)' : 'var(--danger)';
+  m.textContent = text;
+}
+
+async function load2fa(){
+  document.getElementById('tfa-msg').style.display = 'none';
+  document.getElementById('tfa-loading').style.display = 'block';
+  document.getElementById('tfa-disabled').style.display = 'none';
+  document.getElementById('tfa-enabled').style.display = 'none';
+  document.getElementById('tfa-step-code').style.display = 'none';
+  document.getElementById('tfa-step-email').style.display = 'block';
+  try{
+    const resp = await fetch('/api/profile/2fa');
+    const data = await resp.json();
+    document.getElementById('tfa-loading').style.display = 'none';
+    const badge = document.getElementById('tfa-badge');
+    if(data.enabled){
+      badge.textContent = 'Activé'; badge.className = 'badge-status badge-ready';
+      document.getElementById('tfa-enabled-email').textContent = data.email || '';
+      document.getElementById('tfa-enabled').style.display = 'block';
+    } else {
+      badge.textContent = 'Désactivé'; badge.className = 'badge-status badge-destroying';
+      document.getElementById('tfa-disabled').style.display = 'block';
+      if(!data.smtp_configured){
+        document.getElementById('tfa-send-btn').disabled = true;
+        tfaShowMsg("L'envoi d'email n'est pas configuré sur le serveur.", false);
+      }
+    }
+  }catch(ex){
+    document.getElementById('tfa-loading').style.display = 'none';
+    tfaShowMsg('Erreur de chargement du statut 2FA', false);
+  }
+}
+
+async function tfaSendCode(){
+  const email = document.getElementById('tfa-email').value.trim();
+  if(!email){ tfaShowMsg('Saisissez une adresse email', false); return; }
+  const btn = document.getElementById('tfa-send-btn');
+  btn.disabled = true; btn.textContent = '...';
+  try{
+    const resp = await fetch('/api/profile/2fa/setup',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email})
+    });
+    const data = await resp.json();
+    if(resp.ok){
+      document.getElementById('tfa-dest').textContent = data.email;
+      document.getElementById('tfa-step-email').style.display = 'none';
+      document.getElementById('tfa-step-code').style.display = 'block';
+      tfaShowMsg('Code envoyé. Vérifiez votre boîte mail.', true);
+    } else {
+      tfaShowMsg(data.detail || 'Erreur', false);
+    }
+  }catch(ex){ tfaShowMsg('Erreur réseau', false); }
+  btn.disabled = false; btn.textContent = 'Envoyer un code';
+}
+
+async function tfaConfirm(){
+  const code = document.getElementById('tfa-code').value.trim();
+  if(!code){ tfaShowMsg('Saisissez le code reçu', false); return; }
+  const btn = document.getElementById('tfa-confirm-btn');
+  btn.disabled = true; btn.textContent = '...';
+  try{
+    const resp = await fetch('/api/profile/2fa/confirm',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({code})
+    });
+    const data = await resp.json();
+    if(resp.ok){ tfaShowMsg('2FA activé avec succès', true); load2fa(); }
+    else { tfaShowMsg(data.detail || 'Erreur', false); }
+  }catch(ex){ tfaShowMsg('Erreur réseau', false); }
+  btn.disabled = false; btn.textContent = 'Activer le 2FA';
+}
+
+async function tfaDisable(){
+  const password = document.getElementById('tfa-disable-pwd').value;
+  if(!password){ tfaShowMsg('Saisissez votre mot de passe', false); return; }
+  const btn = document.getElementById('tfa-disable-btn');
+  btn.disabled = true; btn.textContent = '...';
+  try{
+    const resp = await fetch('/api/profile/2fa/disable',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password})
+    });
+    const data = await resp.json();
+    if(resp.ok){ document.getElementById('tfa-disable-pwd').value=''; tfaShowMsg('2FA désactivé', true); load2fa(); }
+    else { tfaShowMsg(data.detail || 'Erreur', false); }
+  }catch(ex){ tfaShowMsg('Erreur réseau', false); }
+  btn.disabled = false; btn.textContent = 'Désactiver le 2FA';
 }
 </script>
 {% endif %}

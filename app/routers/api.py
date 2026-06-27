@@ -1,13 +1,16 @@
 """API REST JSON."""
+import asyncio
 import logging
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Body, Request, HTTPException
 from fastapi.responses import RedirectResponse
 
+from ..config import settings
 from ..database import db_cursor
 from ..models import TemplateIn, CloneRequest, DestroyRequest
-from ..services import proxmox, guacamole, clone_manager, backup
+from ..services import proxmox, guacamole, clone_manager, backup, twofa, mailer
 from .auth import current_user, require_user, require_admin
 
 log = logging.getLogger("vdi-orchestrator")
@@ -299,6 +302,78 @@ async def api_change_password(request: Request,
     if not ok:
         raise HTTPException(403, "Ancien mot de passe incorrect")
     return {"status": "ok"}
+
+
+# ── 2FA par email (opt-in par utilisateur) ──────────────
+
+@router.get("/profile/2fa")
+async def api_2fa_status(request: Request):
+    user = require_user(request)
+    status = twofa.get_status(user["username"])
+    return {
+        "enabled": status["enabled"],
+        "email": twofa.mask_email(status["email"]) if status["email"] else None,
+        "smtp_configured": settings.SMTP_CONFIGURED,
+    }
+
+
+@router.post("/profile/2fa/setup")
+async def api_2fa_setup(request: Request, email: str = Body(..., embed=True)):
+    """Étape 1 : envoie un code de vérification à l'email fourni."""
+    user = require_user(request)
+    if not settings.SMTP_CONFIGURED:
+        raise HTTPException(503, "Envoi d'email non configuré sur le serveur")
+    email = email.strip()
+    if not twofa.valid_email(email):
+        raise HTTPException(400, "Adresse email invalide")
+
+    code = twofa.generate_code()
+    sent = await asyncio.to_thread(mailer.send_otp, email, code, settings.TWOFA_CODE_TTL)
+    if not sent:
+        raise HTTPException(502, "Impossible d'envoyer l'email de vérification")
+
+    request.session["2fa_setup"] = {
+        "email": email,
+        "code_hash": twofa.hash_code(code),
+        "exp": time.time() + settings.TWOFA_CODE_TTL,
+        "attempts": 0,
+    }
+    return {"status": "sent", "email": twofa.mask_email(email)}
+
+
+@router.post("/profile/2fa/confirm")
+async def api_2fa_confirm(request: Request, code: str = Body(..., embed=True)):
+    """Étape 2 : valide le code et active le 2FA."""
+    user = require_user(request)
+    setup = request.session.get("2fa_setup")
+    if not setup:
+        raise HTTPException(400, "Aucune vérification en cours")
+    if time.time() > setup["exp"]:
+        request.session.pop("2fa_setup", None)
+        raise HTTPException(400, "Code expiré, recommencez")
+
+    if not twofa.verify_code(code, setup["code_hash"]):
+        setup["attempts"] += 1
+        if setup["attempts"] >= settings.TWOFA_MAX_ATTEMPTS:
+            request.session.pop("2fa_setup", None)
+            raise HTTPException(403, "Trop de tentatives, recommencez")
+        request.session["2fa_setup"] = setup
+        raise HTTPException(400, "Code invalide")
+
+    twofa.enable(user["username"], setup["email"])
+    request.session.pop("2fa_setup", None)
+    return {"status": "enabled", "email": twofa.mask_email(setup["email"])}
+
+
+@router.post("/profile/2fa/disable")
+async def api_2fa_disable(request: Request, password: str = Body(..., embed=True)):
+    """Désactive le 2FA (confirmation par mot de passe)."""
+    user = require_user(request)
+    if not guacamole.authenticate_user(user["username"], password):
+        raise HTTPException(403, "Mot de passe incorrect")
+    twofa.disable(user["username"])
+    request.session.pop("2fa_setup", None)
+    return {"status": "disabled"}
 
 
 # ── Sessions / stats (admin) ────────────────────────────

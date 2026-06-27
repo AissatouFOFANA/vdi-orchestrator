@@ -81,6 +81,14 @@ CREATE TABLE IF NOT EXISTS vdi_session_log (
 
 CREATE INDEX IF NOT EXISTS idx_vdi_session_log_username ON vdi_session_log(username);
 CREATE INDEX IF NOT EXISTS idx_vdi_session_log_created ON vdi_session_log(created_at);
+
+CREATE TABLE IF NOT EXISTS vdi_user_2fa (
+    username VARCHAR(255) PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

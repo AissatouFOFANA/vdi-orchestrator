@@ -50,7 +50,8 @@ async def lifespan(app: FastAPI):
 
 
 class AuthGateMiddleware(BaseHTTPMiddleware):
-    PUBLIC_PATHS = {"/login", "/logout", "/api/health", "/favicon.ico"}
+    PUBLIC_PATHS = {"/login", "/login/verify", "/login/verify/resend",
+                    "/logout", "/api/health", "/favicon.ico"}
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path

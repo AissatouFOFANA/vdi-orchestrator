@@ -39,5 +39,20 @@ class Settings:
     BACKUP_MAX_SIZE_MB = int(os.getenv("BACKUP_MAX_SIZE_MB", "500"))
     BACKUP_VM_USER = os.getenv("BACKUP_VM_USER", "etudiant")
 
+    # ── 2FA par email (OTP) ──
+    SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USER = os.getenv("SMTP_USER", "")
+    # Mot de passe d'application Gmail (les espaces sont ignorés).
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").replace(" ", "")
+    SMTP_FROM = os.getenv("SMTP_FROM", "") or os.getenv("SMTP_USER", "")
+    SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "VDI Orchestrator")
+    TWOFA_CODE_TTL = int(os.getenv("TWOFA_CODE_TTL", "300"))
+    TWOFA_MAX_ATTEMPTS = int(os.getenv("TWOFA_MAX_ATTEMPTS", "5"))
+
+    @property
+    def SMTP_CONFIGURED(self) -> bool:
+        return bool(self.SMTP_HOST and self.SMTP_USER and self.SMTP_PASSWORD)
+
 
 settings = Settings()

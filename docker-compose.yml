@@ -80,6 +80,14 @@ services:
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       BACKUP_MAX_SIZE_MB: ${BACKUP_MAX_SIZE_MB:-500}
       BACKUP_VM_USER: ${BACKUP_VM_USER:-etudiant}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-VDI Orchestrator}
+      TWOFA_CODE_TTL: ${TWOFA_CODE_TTL:-300}
+      TWOFA_MAX_ATTEMPTS: ${TWOFA_MAX_ATTEMPTS:-5}
     volumes:
       - vdi-backups:/srv/backups
     depends_on:
