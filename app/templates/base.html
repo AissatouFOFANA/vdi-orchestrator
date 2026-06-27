@@ -85,10 +85,11 @@ label{display:block;color:var(--text-dim);font-size:12px;font-weight:500;margin-
 .resource-pick{margin:14px 0;padding:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px}
 .resource-pick .row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .resource-pick .row:last-child{margin-bottom:0}
-.resource-pick .row label{flex:0 0 60px;margin:0;text-transform:none;letter-spacing:0;color:var(--text-dim);font-size:12px}
-.resource-pick .row input[type=range]{flex:1;width:auto;padding:0;background:transparent;border:none;accent-color:var(--accent);height:4px}
-.resource-pick .row .val{flex:0 0 80px;text-align:right;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;font-size:13px}
-.resource-pick .row .bounds{flex:0 0 auto;color:var(--text-mute);font-size:11px;font-variant-numeric:tabular-nums}
+.resource-pick .row label{flex:0 0 46px;margin:0;text-transform:none;letter-spacing:0;color:var(--text-dim);font-size:12px}
+.resource-pick .row input[type=range]{flex:1 1 auto;min-width:0;width:auto;padding:0;background:transparent;border:none;accent-color:var(--accent);height:4px}
+.resource-pick .row .meta{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;line-height:1.2;min-width:52px}
+.resource-pick .row .meta .val{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;font-size:13px}
+.resource-pick .row .meta .bounds{color:var(--text-mute);font-size:10px;font-variant-numeric:tabular-nums}
 @media (max-width:640px){
   header{padding:12px 16px;flex-wrap:wrap;gap:10px}
   main{padding:20px 16px}

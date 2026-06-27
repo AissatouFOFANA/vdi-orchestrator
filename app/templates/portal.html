@@ -63,15 +63,19 @@
           <label>vCPU</label>
           <input type="range" class="cores-slider"
                  min="{{ tpl.cores_min }}" max="{{ tpl.cores_max }}" value="{{ tpl.cores }}" step="1">
-          <span class="val cores-val">{{ tpl.cores }}</span>
-          <span class="bounds">{{ tpl.cores_min }}–{{ tpl.cores_max }}</span>
+          <div class="meta">
+            <span class="val cores-val">{{ tpl.cores }}</span>
+            <span class="bounds">{{ tpl.cores_min }}–{{ tpl.cores_max }}</span>
+          </div>
         </div>
         <div class="row">
           <label>RAM</label>
           <input type="range" class="memory-slider"
                  min="{{ tpl.memory_min }}" max="{{ tpl.memory_max }}" value="{{ tpl.memory }}" step="256">
-          <span class="val memory-val">{{ tpl.memory }} Mo</span>
-          <span class="bounds">{{ tpl.memory_min }}–{{ tpl.memory_max }}</span>
+          <div class="meta">
+            <span class="val memory-val">{{ tpl.memory }} Mo</span>
+            <span class="bounds">{{ tpl.memory_min }}–{{ tpl.memory_max }}</span>
+          </div>
         </div>
         {% if user.is_admin %}
         <div class="row" style="margin-top:6px">
