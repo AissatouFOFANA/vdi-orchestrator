@@ -9,7 +9,8 @@ from fastapi.responses import RedirectResponse
 
 from ..config import settings
 from ..database import db_cursor
-from ..models import TemplateIn, CloneRequest, DestroyRequest
+from ..models import (TemplateIn, CloneRequest, DestroyRequest,
+                      UserIn, UserUpdate, GroupIn)
 from ..services import proxmox, guacamole, clone_manager, backup, twofa, mailer
 from .auth import current_user, require_user, require_admin
 
@@ -374,6 +375,105 @@ async def api_2fa_disable(request: Request, password: str = Body(..., embed=True
     twofa.disable(user["username"])
     request.session.pop("2fa_setup", None)
     return {"status": "disabled"}
+
+
+# ── Gestion des utilisateurs & groupes (admin) ──────────
+
+PROTECTED_USERS = {"guacadmin"}
+
+
+@router.get("/users")
+async def api_list_users(request: Request):
+    require_admin(request)
+    return guacamole.list_users()
+
+
+@router.post("/users")
+async def api_create_user(request: Request, payload: UserIn):
+    require_admin(request)
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(400, "Nom d'utilisateur requis")
+    if guacamole.user_exists(username):
+        raise HTTPException(409, "Cet utilisateur existe déjà")
+    try:
+        guacamole.create_user(
+            username, payload.password, disabled=payload.disabled,
+            full_name=payload.full_name or None, email=payload.email or None,
+        )
+        guacamole.set_user_groups(username, payload.groups)
+        if payload.is_admin:
+            guacamole.set_user_admin(username, True)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        log.error(f"create_user failed: {e}")
+        raise HTTPException(500, "Échec de la création de l'utilisateur")
+    return {"status": "created", "username": username}
+
+
+@router.put("/users/{username}")
+async def api_update_user(username: str, request: Request, payload: UserUpdate):
+    admin = require_admin(request)
+    if not guacamole.user_exists(username):
+        raise HTTPException(404, "Utilisateur introuvable")
+
+    is_self = username == admin["username"]
+    is_protected = username in PROTECTED_USERS
+
+    if (is_self or is_protected) and payload.disabled:
+        raise HTTPException(400, "Impossible de désactiver ce compte")
+    if (is_self or is_protected) and not payload.is_admin:
+        raise HTTPException(400, "Impossible de retirer les droits admin de ce compte")
+
+    if payload.password:
+        if len(payload.password) < 4:
+            raise HTTPException(400, "Le mot de passe doit contenir au moins 4 caractères")
+        guacamole.set_user_password(username, payload.password)
+    guacamole.set_user_profile(username, payload.full_name or None, payload.email or None)
+    guacamole.set_user_disabled(username, payload.disabled)
+    guacamole.set_user_admin(username, payload.is_admin)
+    guacamole.set_user_groups(username, payload.groups)
+    return {"status": "updated", "username": username}
+
+
+@router.delete("/users/{username}")
+async def api_delete_user(username: str, request: Request):
+    admin = require_admin(request)
+    if username in PROTECTED_USERS:
+        raise HTTPException(400, "Ce compte ne peut pas être supprimé")
+    if username == admin["username"]:
+        raise HTTPException(400, "Vous ne pouvez pas supprimer votre propre compte")
+    if not guacamole.user_exists(username):
+        raise HTTPException(404, "Utilisateur introuvable")
+    guacamole.delete_user(username)
+    return {"status": "deleted"}
+
+
+@router.get("/groups")
+async def api_list_groups(request: Request):
+    require_admin(request)
+    return guacamole.list_groups()
+
+
+@router.post("/groups")
+async def api_create_group(request: Request, payload: GroupIn):
+    require_admin(request)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Nom de groupe requis")
+    try:
+        guacamole.create_group(name)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"status": "created", "name": name}
+
+
+@router.delete("/groups/{name}")
+async def api_delete_group(name: str, request: Request):
+    require_admin(request)
+    guacamole.delete_group(name)
+    return {"status": "deleted"}
 
 
 # ── Sessions / stats (admin) ────────────────────────────

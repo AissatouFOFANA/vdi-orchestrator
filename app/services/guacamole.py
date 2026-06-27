@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 from typing import Optional
 
@@ -94,6 +95,14 @@ def is_admin(username: str) -> bool:
         conn.close()
 
 
+def _hash_password(password: str) -> tuple[bytes, bytes]:
+    """Retourne (password_hash, salt) au format attendu par Guacamole."""
+    salt = os.urandom(32)
+    salt_hex = salt.hex().upper()
+    pwd_hash = hashlib.sha256((password + salt_hex).encode("utf-8")).digest()
+    return pwd_hash, salt
+
+
 def change_password(username: str, old_password: str, new_password: str) -> bool:
     """Change le mot de passe d'un utilisateur Guacamole."""
     if not authenticate_user(username, old_password):
@@ -101,11 +110,7 @@ def change_password(username: str, old_password: str, new_password: str) -> bool
     conn = get_db()
     try:
         cur = conn.cursor()
-        # Générer un nouveau sel (32 bytes aléatoires)
-        import os
-        new_salt = os.urandom(32)
-        salt_hex = new_salt.hex().upper()
-        new_hash = hashlib.sha256((new_password + salt_hex).encode("utf-8")).digest()
+        new_hash, new_salt = _hash_password(new_password)
         cur.execute("""
             UPDATE guacamole_user
             SET password_hash = %s, password_salt = %s
@@ -130,7 +135,11 @@ def list_users() -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT e.name, u.disabled,
+            SELECT e.name, u.disabled, u.full_name, u.email_address,
+                   EXISTS(
+                       SELECT 1 FROM guacamole_system_permission sp
+                       WHERE sp.entity_id = e.entity_id AND sp.permission = 'ADMINISTER'
+                   ) AS is_admin,
                    COALESCE(array_agg(ge.name) FILTER (WHERE ge.name IS NOT NULL), '{}')
             FROM guacamole_entity e
             JOIN guacamole_user u ON u.entity_id = e.entity_id
@@ -138,13 +147,248 @@ def list_users() -> list[dict]:
             LEFT JOIN guacamole_user_group ug ON ug.user_group_id = m.user_group_id
             LEFT JOIN guacamole_entity ge ON ge.entity_id = ug.entity_id
             WHERE e.type = 'USER'
-            GROUP BY e.name, u.disabled
+            GROUP BY e.name, u.disabled, u.full_name, u.email_address, e.entity_id
             ORDER BY e.name
         """)
         return [
-            {"username": r[0], "disabled": r[1], "groups": list(r[2])}
+            {
+                "username": r[0],
+                "disabled": r[1],
+                "full_name": r[2],
+                "email": r[3],
+                "is_admin": bool(r[4]) or r[0] == "guacadmin" or r[0] in settings.EXTRA_ADMINS,
+                "groups": list(r[5]),
+            }
             for r in cur.fetchall()
         ]
+    finally:
+        conn.close()
+
+
+def user_exists(username: str) -> bool:
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM guacamole_entity WHERE name = %s AND type = 'USER'",
+            (username,),
+        )
+        return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+# ── Gestion des utilisateurs (écriture) ─────────────────
+
+def create_user(username: str, password: str, disabled: bool = False,
+                full_name: Optional[str] = None, email: Optional[str] = None):
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM guacamole_entity WHERE name = %s AND type = 'USER'",
+            (username,),
+        )
+        if cur.fetchone():
+            raise ValueError("Utilisateur déjà existant")
+        cur.execute(
+            "INSERT INTO guacamole_entity (name, type) VALUES (%s, 'USER') RETURNING entity_id",
+            (username,),
+        )
+        entity_id = cur.fetchone()[0]
+        pwd_hash, salt = _hash_password(password)
+        cur.execute("""
+            INSERT INTO guacamole_user
+                (entity_id, password_hash, password_salt, password_date,
+                 disabled, full_name, email_address)
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
+        """, (entity_id, pwd_hash, salt, disabled, full_name, email))
+        conn.commit()
+        log.info(f"User created: {username}")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def delete_user(username: str):
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        # La suppression de l'entité cascade vers user, permissions et memberships.
+        cur.execute(
+            "DELETE FROM guacamole_entity WHERE name = %s AND type = 'USER'",
+            (username,),
+        )
+        conn.commit()
+        log.info(f"User deleted: {username}")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def set_user_password(username: str, new_password: str):
+    """Réinitialise le mot de passe (admin, sans ancien mot de passe)."""
+    pwd_hash, salt = _hash_password(new_password)
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE guacamole_user
+            SET password_hash = %s, password_salt = %s, password_date = CURRENT_TIMESTAMP
+            WHERE entity_id = (
+                SELECT entity_id FROM guacamole_entity
+                WHERE name = %s AND type = 'USER'
+            )
+        """, (pwd_hash, salt, username))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def set_user_disabled(username: str, disabled: bool):
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE guacamole_user SET disabled = %s
+            WHERE entity_id = (
+                SELECT entity_id FROM guacamole_entity
+                WHERE name = %s AND type = 'USER'
+            )
+        """, (disabled, username))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def set_user_profile(username: str, full_name: Optional[str], email: Optional[str]):
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE guacamole_user SET full_name = %s, email_address = %s
+            WHERE entity_id = (
+                SELECT entity_id FROM guacamole_entity
+                WHERE name = %s AND type = 'USER'
+            )
+        """, (full_name, email, username))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def set_user_admin(username: str, is_admin: bool):
+    """Accorde ou retire la permission système ADMINISTER."""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        if is_admin:
+            cur.execute("""
+                INSERT INTO guacamole_system_permission (entity_id, permission)
+                SELECT entity_id, 'ADMINISTER'
+                FROM guacamole_entity WHERE name = %s AND type = 'USER'
+                ON CONFLICT DO NOTHING
+            """, (username,))
+        else:
+            cur.execute("""
+                DELETE FROM guacamole_system_permission
+                WHERE permission = 'ADMINISTER' AND entity_id = (
+                    SELECT entity_id FROM guacamole_entity
+                    WHERE name = %s AND type = 'USER'
+                )
+            """, (username,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def set_user_groups(username: str, groups: list[str]):
+    """Remplace l'appartenance aux groupes de l'utilisateur."""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT entity_id FROM guacamole_entity WHERE name = %s AND type = 'USER'",
+            (username,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError("Utilisateur introuvable")
+        uid = row[0]
+        cur.execute("DELETE FROM guacamole_user_group_member WHERE member_entity_id = %s", (uid,))
+        for g in groups:
+            cur.execute("""
+                INSERT INTO guacamole_user_group_member (user_group_id, member_entity_id)
+                SELECT ug.user_group_id, %s
+                FROM guacamole_user_group ug
+                JOIN guacamole_entity e ON e.entity_id = ug.entity_id
+                WHERE e.name = %s AND e.type = 'USER_GROUP'
+                ON CONFLICT DO NOTHING
+            """, (uid, g))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ── Gestion des groupes ─────────────────────────────────
+
+def create_group(name: str):
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM guacamole_entity WHERE name = %s AND type = 'USER_GROUP'",
+            (name,),
+        )
+        if cur.fetchone():
+            raise ValueError("Groupe déjà existant")
+        cur.execute(
+            "INSERT INTO guacamole_entity (name, type) VALUES (%s, 'USER_GROUP') RETURNING entity_id",
+            (name,),
+        )
+        eid = cur.fetchone()[0]
+        cur.execute("INSERT INTO guacamole_user_group (entity_id) VALUES (%s)", (eid,))
+        conn.commit()
+        log.info(f"Group created: {name}")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def delete_group(name: str):
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM guacamole_entity WHERE name = %s AND type = 'USER_GROUP'",
+            (name,),
+        )
+        conn.commit()
+        log.info(f"Group deleted: {name}")
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

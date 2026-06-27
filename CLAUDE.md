@@ -70,6 +70,7 @@ Créées au démarrage via `IF NOT EXISTS` dans la même DB que Guacamole :
 - `vdi_template_group` — association template → groupes Guacamole autorisés. Un template **sans groupe assigné est visible par tous**.
 - `vdi_clone` — clones actifs. `UNIQUE(vmid)` sert de **verrou DB pour la réservation** (voir `clone_manager.request_clone`).
 - `vdi_session_log` — historique des sessions terminées, avec `destroy_reason` (`manual`, `auto_disconnect`, `unused_timeout`, `timeout`, `cleanup`, `error`).
+- `vdi_user_2fa` — 2FA email opt-in par utilisateur (`username`, `email`, `enabled`). Le code OTP n'est jamais stocké en clair : seul son HMAC (clé = `SECRET_KEY`) transite dans la session signée. SMTP configuré via `SMTP_*` ; envoi dans `services/mailer.py`, logique OTP dans `services/twofa.py`.
 
 Pas d'ORM, pas de framework de migration — toutes les requêtes SQL sont explicites dans `database.py`, `services/guacamole.py`, `services/clone_manager.py`, `routers/*`.
 
@@ -128,7 +129,7 @@ Déclarées dans `app/config.py` (singleton `settings`). Critiques en prod : `PR
 ## À NE PAS faire
 
 - Pas d'ORM (pas de SQLAlchemy) — toutes les requêtes SQL sont directes via `psycopg2` + `db_cursor()`.
-- Pas d'`ALTER TABLE` sur les tables `guacamole_*` — lecture seule pour auth/groupes, écriture uniquement sur `guacamole_connection*` et `guacamole_connection_permission`.
+- Pas d'`ALTER TABLE` (DDL) sur les tables `guacamole_*`. En revanche le DML est autorisé : `guacamole_connection*` / `guacamole_connection_permission` (connexions) **et** la gestion des comptes via `guacamole_entity`, `guacamole_user`, `guacamole_user_group_member`, `guacamole_system_permission` (création/édition/suppression d'utilisateurs et de groupes — voir `services/guacamole.py`). Toute écriture respecte le schéma upstream (hash `SHA256(password + UPPER(HEX(salt)))`, suppression par cascade de l'entité).
 - Pas d'API REST Guacamole — tout passe par SQL direct.
 - Pas de framework JS frontend — HTML server-side via Jinja2, CSS inliné dans `templates/base.html`, vanilla JS dans les pages.
 - Pas de `localStorage` côté frontend — l'état de session côté client est dans le cookie signé.

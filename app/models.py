@@ -69,3 +69,28 @@ class CloneRequest(BaseModel):
 
 class DestroyRequest(BaseModel):
     backup: bool = True
+
+
+class UserIn(BaseModel):
+    """Création d'un utilisateur Guacamole."""
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=4, max_length=255)
+    disabled: bool = False
+    is_admin: bool = False
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    groups: list[str] = []
+
+
+class UserUpdate(BaseModel):
+    """Mise à jour d'un utilisateur. password=None => inchangé."""
+    password: Optional[str] = None
+    disabled: bool = False
+    is_admin: bool = False
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    groups: list[str] = []
+
+
+class GroupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)

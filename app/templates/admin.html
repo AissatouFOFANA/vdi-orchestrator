@@ -28,6 +28,7 @@
   <div class="tab" data-tab="clones">Clones actifs</div>
   <div class="tab" data-tab="history">Historique</div>
   <div class="tab" data-tab="users">Utilisateurs</div>
+  <div class="tab" data-tab="groups">Groupes</div>
 </div>
 
 <div class="tab-panel" id="panel-templates">
@@ -132,20 +133,92 @@
 </div>
 
 <div class="tab-panel" id="panel-users" style="display:none">
-  <h2>Utilisateurs Guacamole</h2>
+  <div class="flex-between mb-4">
+    <h2 style="margin:0">Utilisateurs Guacamole</h2>
+    <button class="btn btn-primary" onclick="openUserModal()">Ajouter un utilisateur</button>
+  </div>
   <div class="card" style="padding:0;overflow:hidden">
     <table>
-      <thead><tr><th>Utilisateur</th><th>Groupes</th><th>État</th></tr></thead>
+      <thead><tr><th>Utilisateur</th><th>Nom / Email</th><th>Groupes</th><th>Rôle</th><th>État</th><th></th></tr></thead>
       <tbody>
         {% for u in guac_users %}
         <tr>
           <td><strong>{{ u.username }}</strong></td>
+          <td class="text-dim">{{ u.full_name or '—' }}{% if u.email %}<div class="text-mute">{{ u.email }}</div>{% endif %}</td>
           <td class="text-dim">{{ u.groups|join(', ') or '—' }}</td>
+          <td>{% if u.is_admin %}<span class="badge">ADMIN</span>{% else %}<span class="text-mute">Utilisateur</span>{% endif %}</td>
           <td>{% if u.disabled %}<span class="badge-status badge-error">Désactivé</span>{% else %}<span class="badge-status badge-ready">Actif</span>{% endif %}</td>
+          <td>
+            <div class="flex">
+              <button class="btn btn-ghost" style="padding:5px 10px" onclick='editUser({{ u|tojson }})'>Modifier</button>
+              {% if u.username != user.username and u.username != 'guacadmin' %}
+              <button class="btn btn-danger" style="padding:5px 10px" onclick="deleteUser('{{ u.username }}')">Supprimer</button>
+              {% endif %}
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+</div>
+
+<div class="tab-panel" id="panel-groups" style="display:none">
+  <div class="flex-between mb-4">
+    <h2 style="margin:0">Groupes Guacamole</h2>
+    <div class="flex">
+      <input type="text" id="new-group-name" placeholder="Nom du groupe" style="width:200px">
+      <button class="btn btn-primary" onclick="createGroup()">Créer</button>
+    </div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead><tr><th>Groupe</th><th></th></tr></thead>
+      <tbody>
+        {% for g in guac_groups %}
+        <tr>
+          <td><strong>{{ g }}</strong></td>
+          <td><button class="btn btn-danger" style="padding:5px 10px" onclick="deleteGroup('{{ g }}')">Supprimer</button></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="2" class="empty">Aucun groupe</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal Utilisateur -->
+<div class="modal-overlay" id="user-modal">
+  <div class="modal">
+    <h3 id="user-modal-title">Nouvel utilisateur</h3>
+    <div id="user-msg" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:6px;font-size:13px"></div>
+    <form id="user-form">
+      <input type="hidden" name="orig_username" value="">
+      <div class="form-grid">
+        <div class="form-row"><label>Identifiant</label><input type="text" name="username" required></div>
+        <div class="form-row"><label id="pwd-label">Mot de passe</label><input type="password" name="password" autocomplete="new-password"></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row"><label>Nom complet</label><input type="text" name="full_name"></div>
+        <div class="form-row"><label>Email</label><input type="email" name="email"></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row"><label>Compte</label><select name="disabled"><option value="false">Actif</option><option value="true">Désactivé</option></select></div>
+        <div class="form-row"><label>Rôle</label><select name="is_admin"><option value="false">Utilisateur</option><option value="true">Administrateur</option></select></div>
+      </div>
+      <div class="form-row">
+        <label>Groupes</label>
+        <select name="groups" multiple size="5">
+          {% for g in guac_groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+        </select>
+        <div class="text-mute mt-4">Maintenir Ctrl/Cmd pour en sélectionner plusieurs</div>
+      </div>
+      <div class="flex mt-6" style="justify-content:flex-end">
+        <button type="button" class="btn btn-ghost" onclick="closeUserModal()">Annuler</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -331,6 +404,99 @@ async function refreshMetrics(){
 // Rafraîchir les métriques toutes les 10 secondes
 refreshMetrics();
 setInterval(refreshMetrics, 10000);
+
+// --- Gestion des utilisateurs ---
+const userModal = document.getElementById('user-modal');
+const userForm = document.getElementById('user-form');
+
+function userMsg(text, ok){
+  const m = document.getElementById('user-msg');
+  m.style.display = 'block';
+  m.style.background = ok ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)';
+  m.style.color = ok ? 'var(--success)' : 'var(--danger)';
+  m.textContent = text;
+}
+
+function openUserModal(){
+  userForm.reset();
+  document.getElementById('user-msg').style.display = 'none';
+  userForm.elements['orig_username'].value = '';
+  userForm.elements['username'].readOnly = false;
+  document.getElementById('user-modal-title').textContent = 'Nouvel utilisateur';
+  document.getElementById('pwd-label').textContent = 'Mot de passe';
+  userForm.elements['password'].required = true;
+  userModal.classList.add('open');
+}
+function closeUserModal(){ userModal.classList.remove('open'); }
+
+function editUser(u){
+  userForm.reset();
+  document.getElementById('user-msg').style.display = 'none';
+  userForm.elements['orig_username'].value = u.username;
+  userForm.elements['username'].value = u.username;
+  userForm.elements['username'].readOnly = true;
+  userForm.elements['full_name'].value = u.full_name || '';
+  userForm.elements['email'].value = u.email || '';
+  userForm.elements['disabled'].value = u.disabled ? 'true' : 'false';
+  userForm.elements['is_admin'].value = u.is_admin ? 'true' : 'false';
+  const sel = userForm.elements['groups'];
+  [...sel.options].forEach(o => o.selected = (u.groups || []).includes(o.value));
+  document.getElementById('user-modal-title').textContent = 'Modifier ' + u.username;
+  document.getElementById('pwd-label').textContent = 'Nouveau mot de passe (vide = inchangé)';
+  userForm.elements['password'].required = false;
+  userModal.classList.add('open');
+}
+
+userForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(userForm);
+  const orig = fd.get('orig_username');
+  const groups = [...userForm.elements['groups'].selectedOptions].map(o => o.value);
+  const payload = {
+    disabled: fd.get('disabled') === 'true',
+    is_admin: fd.get('is_admin') === 'true',
+    full_name: fd.get('full_name') || null,
+    email: fd.get('email') || null,
+    groups,
+  };
+  const pwd = fd.get('password');
+  let url, method;
+  if(orig){
+    url = '/api/users/' + encodeURIComponent(orig);
+    method = 'PUT';
+    payload.password = pwd || null;
+  } else {
+    url = '/api/users';
+    method = 'POST';
+    payload.username = fd.get('username');
+    payload.password = pwd;
+  }
+  const resp = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  if(resp.ok){ window.location.reload(); }
+  else { const err = await resp.json().catch(()=>({})); userMsg(err.detail || ('Erreur ' + resp.status), false); }
+});
+
+async function deleteUser(username){
+  if(!confirm('Supprimer l\'utilisateur ' + username + ' ?')) return;
+  const resp = await fetch('/api/users/' + encodeURIComponent(username), {method:'DELETE'});
+  if(resp.ok){ window.location.reload(); }
+  else { const err = await resp.json().catch(()=>({})); alert('Erreur : ' + (err.detail || resp.status)); }
+}
+
+async function createGroup(){
+  const name = document.getElementById('new-group-name').value.trim();
+  if(!name){ alert('Nom de groupe requis'); return; }
+  const resp = await fetch('/api/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+  if(resp.ok){ window.location.reload(); }
+  else { const err = await resp.json().catch(()=>({})); alert('Erreur : ' + (err.detail || resp.status)); }
+}
+
+async function deleteGroup(name){
+  if(!confirm('Supprimer le groupe ' + name + ' ? Les utilisateurs y perdront leur appartenance.')) return;
+  const resp = await fetch('/api/groups/' + encodeURIComponent(name), {method:'DELETE'});
+  if(resp.ok){ window.location.reload(); }
+  else { const err = await resp.json().catch(()=>({})); alert('Erreur : ' + (err.detail || resp.status)); }
+}
 
 async function scanProxmox(){
   try{
